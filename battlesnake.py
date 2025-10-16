@@ -39,42 +39,120 @@ class BattlesnakeLogic:
         """Main function to determine the next move"""
         my_snake = game_state['you']
         board = game_state['board']
+        head = my_snake['head']
+        
+        # Debug logging
+        print(f"\n=== TURN {game_state.get('turn', 0)} ===")
+        print(f"Head position: ({head['x']}, {head['y']})")
+        print(f"Board size: {board['width']}x{board['height']}")
+        
+        # FIRST: Get all safe moves (no walls, no immediate death)
+        safe_moves = self.get_safe_moves(head, my_snake, board)
+        
+        print(f"Safe moves available: {safe_moves}")
+        
+        # If no safe moves, we're dead anyway - pick randomly
+        if not safe_moves:
+            print("❌ NO SAFE MOVES - choosing randomly")
+            return random.choice(self.directions)
+        
+        # If only one safe move, take it
+        if len(safe_moves) == 1:
+            print(f"✓ Only one safe move: {safe_moves[0]}")
+            return safe_moves[0]
         
         # Dynamically adjust strategy based on snake state
         self.adjust_strategy(my_snake, board)
         
-        # Calculate scores for all possible moves
-        move_scores = self.calculate_move_scores(my_snake, board)
+        # Calculate scores ONLY for safe moves
+        move_scores = {}
+        for direction in safe_moves:
+            new_pos = self.get_new_position(head, direction)
+            score = 0.0
+            
+            # Add wall proximity penalty
+            wall_proximity_score = self.calculate_wall_proximity_score(new_pos, board)
+            score += wall_proximity_score
+            
+            # Check for traps and dead ends
+            trap_penalty = self.calculate_trap_score(new_pos, my_snake, board)
+            score += trap_penalty
+            
+            # Skip if trapped badly
+            if trap_penalty > -500:
+                # Calculate escape routes
+                escape_score = self.calculate_escape_route_score(new_pos, my_snake, board)
+                score += escape_score
+                
+                # Smart tail chasing
+                tail_score = self.calculate_tail_chase_score(new_pos, my_snake, board)
+                score += tail_score
+                
+                # Strategic factors
+                score += self.calculate_food_score(new_pos, board['food'])
+                score += self.calculate_space_score(new_pos, my_snake, board)
+                score += self.calculate_center_score(new_pos, board)
+                score += self.calculate_enemy_avoidance_score(new_pos, board['snakes'], my_snake)
+                score += self.calculate_head_to_head_score(new_pos, board['snakes'], my_snake)
+            
+            move_scores[direction] = score
         
-        # Sort moves by score (highest first)
+        # Sort by score
         sorted_moves = sorted(move_scores.items(), key=lambda x: x[1], reverse=True)
+        best_move = sorted_moves[0][0]
         
-        # Filter out moves that go out of bounds (safety check)
-        head = my_snake['head']
-        valid_sorted_moves = []
-        for move, score in sorted_moves:
-            new_pos = self.get_new_position(head, move)
-            if not self.is_out_of_bounds(new_pos, board):
-                valid_sorted_moves.append((move, score))
+        strategy = self.get_current_strategy(my_snake)
+        print(f"Strategy: {strategy}")
+        print(f"Move scores: {dict(sorted_moves)}")
+        print(f"✓ Choosing: {best_move}\n")
         
-        # If we have valid moves, take the best one
-        if valid_sorted_moves:
-            best_move = valid_sorted_moves[0][0]
-            strategy = self.get_current_strategy(my_snake)
-            print(f"Strategy: {strategy}, Move scores: {dict(valid_sorted_moves)}")
-            return best_move
+        return best_move
+    
+    def get_safe_moves(self, head: Dict, my_snake: Dict, board: Dict) -> List[str]:
+        """Get all moves that don't immediately kill us (walls, snake bodies)"""
+        safe = []
         
-        # Emergency fallback: find ANY move that doesn't hit a wall
-        print("⚠️ EMERGENCY: No valid moves found, using fallback")
         for direction in self.directions:
             new_pos = self.get_new_position(head, direction)
-            if not self.is_out_of_bounds(new_pos, board):
-                print(f"Emergency move: {direction}")
-                return direction
+            x, y = new_pos
+            
+            # Check walls
+            if x < 0 or x >= board['width'] or y < 0 or y >= board['height']:
+                print(f"  {direction} -> OUT OF BOUNDS ({x}, {y})")
+                continue
+            
+            # Check own body (excluding tail)
+            hit_self = False
+            for i, segment in enumerate(my_snake['body'][:-1]):
+                if new_pos == (segment['x'], segment['y']):
+                    print(f"  {direction} -> HIT OWN BODY at ({x}, {y})")
+                    hit_self = True
+                    break
+            
+            if hit_self:
+                continue
+            
+            # Check enemy bodies
+            hit_enemy = False
+            for snake in board['snakes']:
+                if snake['id'] == my_snake['id']:
+                    continue
+                for i, segment in enumerate(snake['body'][:-1]):
+                    if new_pos == (segment['x'], segment['y']):
+                        print(f"  {direction} -> HIT ENEMY BODY at ({x}, {y})")
+                        hit_enemy = True
+                        break
+                if hit_enemy:
+                    break
+            
+            if hit_enemy:
+                continue
+            
+            # This move is safe!
+            print(f"  {direction} -> SAFE ({x}, {y})")
+            safe.append(direction)
         
-        # Last resort (should never happen)
-        print("❌ CRITICAL: All moves go out of bounds!")
-        return random.choice(self.directions)
+        return safe
 
     def calculate_move_scores(self, my_snake: Dict, board: Dict) -> Dict[str, float]:
         """Calculate weighted scores for each possible move"""
