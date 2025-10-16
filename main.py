@@ -10,9 +10,9 @@ def info():
     return jsonify({
         "apiversion": "1",
         "author": "YourUsername",  # Change this to your name
-        "color": "#FF0000",        # Change snake color (hex)
-        "head": "default",         # Snake head style
-        "tail": "default"          # Snake tail style
+        "color": "#103023",        # Change snake color (hex)
+        "head": "fang",         # Snake head style
+        "tail": "curled"          # Snake tail style
     })
 
 @app.route('/start', methods=['POST'])
