@@ -12,7 +12,7 @@ def info():
         "author": "YourUsername",  # Change this to your name
         "color": "#103023",        # Change snake color (hex)
         "head": "fang",         # Snake head style
-        "tail": "curled"          # Snake tail style
+        "tail": "hook"          # Snake tail style
     })
 
 @app.route('/start', methods=['POST'])
