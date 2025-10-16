@@ -49,13 +49,31 @@ class BattlesnakeLogic:
         # Sort moves by score (highest first)
         sorted_moves = sorted(move_scores.items(), key=lambda x: x[1], reverse=True)
         
-        # Return the best move, or random if all moves are equally bad
-        if sorted_moves:
-            best_move = sorted_moves[0][0]
+        # Filter out moves that go out of bounds (safety check)
+        head = my_snake['head']
+        valid_sorted_moves = []
+        for move, score in sorted_moves:
+            new_pos = self.get_new_position(head, move)
+            if not self.is_out_of_bounds(new_pos, board):
+                valid_sorted_moves.append((move, score))
+        
+        # If we have valid moves, take the best one
+        if valid_sorted_moves:
+            best_move = valid_sorted_moves[0][0]
             strategy = self.get_current_strategy(my_snake)
-            print(f"Strategy: {strategy}, Move scores: {dict(sorted_moves)}")
+            print(f"Strategy: {strategy}, Move scores: {dict(valid_sorted_moves)}")
             return best_move
         
+        # Emergency fallback: find ANY move that doesn't hit a wall
+        print("⚠️ EMERGENCY: No valid moves found, using fallback")
+        for direction in self.directions:
+            new_pos = self.get_new_position(head, direction)
+            if not self.is_out_of_bounds(new_pos, board):
+                print(f"Emergency move: {direction}")
+                return direction
+        
+        # Last resort (should never happen)
+        print("❌ CRITICAL: All moves go out of bounds!")
         return random.choice(self.directions)
 
     def calculate_move_scores(self, my_snake: Dict, board: Dict) -> Dict[str, float]:
@@ -67,13 +85,23 @@ class BattlesnakeLogic:
             new_pos = self.get_new_position(head, direction)
             score = 0.0
             
-            # Check if move is valid (not hitting walls or body)
+            # CRITICAL: Check walls first - absolute priority
+            if self.is_out_of_bounds(new_pos, board):
+                score = -99999.0  # Massive penalty for walls
+                scores[direction] = score
+                continue
+            
+            # Check if move is valid (not hitting body or enemies)
             if not self.is_valid_move(new_pos, my_snake, board):
                 score -= self.weights['avoid_walls']
                 scores[direction] = score
                 continue
             
             # SURVIVAL CHECKS (High Priority)
+            # Add wall proximity penalty
+            wall_proximity_score = self.calculate_wall_proximity_score(new_pos, board)
+            score += wall_proximity_score
+            
             # Check for traps and dead ends
             trap_penalty = self.calculate_trap_score(new_pos, my_snake, board)
             score += trap_penalty
@@ -245,12 +273,12 @@ class BattlesnakeLogic:
         """Quick check if a position is safe (for escape route calculation)"""
         x, y = pos
         
-        # Check bounds
-        if x < 0 or x >= board['width'] or y < 0 or y >= board['height']:
+        # Check bounds - CRITICAL
+        if x < 0 or x >= board.get('width', 11) or y < 0 or y >= board.get('height', 11):
             return False
         
         # Check if occupied by any snake body
-        for snake in board['snakes']:
+        for snake in board.get('snakes', []):
             for segment in snake['body'][:-1]:  # Exclude tails
                 if pos == (segment['x'], segment['y']):
                     return False
@@ -296,20 +324,41 @@ class BattlesnakeLogic:
         return score
 
     def calculate_head_to_head_score(self, pos: Tuple[int, int], snakes: List[Dict], my_snake: Dict) -> float:
-        """Calculate score for head-to-head encounters"""
+        """Calculate score for head-to-head encounters with improved logic"""
         score = 0.0
+        my_length = len(my_snake['body'])
         
         for snake in snakes:
             if snake['id'] == my_snake['id']:
                 continue
             
             enemy_head = (snake['head']['x'], snake['head']['y'])
+            enemy_length = len(snake['body'])
             
             # Check if we're moving adjacent to enemy head
             if self.manhattan_distance(pos, enemy_head) == 1:
-                # If we're smaller or equal size, avoid head-to-head
-                if len(my_snake['body']) <= len(snake['body']):
-                    score += self.weights['head_to_head']
+                # Calculate all possible enemy moves
+                enemy_possible_moves = []
+                for direction in self.directions:
+                    enemy_next_pos = self.get_new_position(snake['head'], direction)
+                    if self.is_position_safe(enemy_next_pos, snake, {'snakes': snakes, 'width': 11, 'height': 11}):
+                        enemy_possible_moves.append(enemy_next_pos)
+                
+                # Check if enemy could move to our position (head-to-head collision)
+                if pos in enemy_possible_moves:
+                    if my_length > enemy_length:
+                        # We're bigger - this is good!
+                        score += 100.0
+                    elif my_length == enemy_length:
+                        # Equal size - risky, slight penalty
+                        score += self.weights['head_to_head'] * 0.5
+                    else:
+                        # We're smaller - avoid!
+                        score += self.weights['head_to_head']
+                else:
+                    # Just moving near enemy head, not direct collision
+                    if my_length <= enemy_length:
+                        score -= 30.0  # Still somewhat risky
         
         return score
 
