@@ -332,9 +332,10 @@ class BattlesnakeLogic:
         return score
 
     def calculate_head_to_head_score(self, pos: Tuple[int, int], snakes: List[Dict], my_snake: Dict) -> float:
-        """Calculate score for head-to-head encounters"""
+        """Calculate score for head-to-head encounters with aggressive winning strategy"""
         score = 0.0
         my_length = len(my_snake['body'])
+        my_head = (my_snake['head']['x'], my_snake['head']['y'])
         
         for snake in snakes:
             if snake['id'] == my_snake['id']:
@@ -343,23 +344,56 @@ class BattlesnakeLogic:
             enemy_head = (snake['head']['x'], snake['head']['y'])
             enemy_length = len(snake['body'])
             
-            if self.manhattan_distance(pos, enemy_head) == 1:
-                enemy_possible_moves = []
-                for direction in self.directions:
-                    enemy_next_pos = self.get_new_position(snake['head'], direction)
-                    if self.is_position_safe(enemy_next_pos, snake, board={'snakes': snakes, 'width': 11, 'height': 11}):
-                        enemy_possible_moves.append(enemy_next_pos)
+            # Calculate all possible enemy next positions
+            enemy_possible_positions = []
+            for direction in self.directions:
+                enemy_next_pos = self.get_new_position(snake['head'], direction)
+                # Check if enemy can actually move there
+                if not self.is_out_of_bounds(enemy_next_pos, {'width': 11, 'height': 11}):
+                    enemy_possible_positions.append(enemy_next_pos)
+            
+            # Check if we're moving to a position where enemy could also move (head-to-head collision)
+            if pos in enemy_possible_positions:
+                distance_between_heads = self.manhattan_distance(my_head, enemy_head)
                 
-                if pos in enemy_possible_moves:
+                # Direct head-to-head collision scenario
+                if distance_between_heads == 2:  # We're 2 steps apart, moving toward each other
                     if my_length > enemy_length:
-                        score += 100.0
+                        # WE'RE BIGGER - AGGRESSIVELY SEEK THIS COLLISION!
+                        score += 300.0
+                        print(f"  💪 HEAD-TO-HEAD ADVANTAGE: We're bigger ({my_length} vs {enemy_length}) - ATTACK!")
                     elif my_length == enemy_length:
-                        score += self.weights['head_to_head'] * 0.5
+                        # EQUAL SIZE - Both die, avoid slightly
+                        score -= 100.0
+                        print(f"  ⚖️ HEAD-TO-HEAD TIE: Equal size ({my_length}) - AVOID mutual destruction")
                     else:
-                        score += self.weights['head_to_head']
-                else:
-                    if my_length <= enemy_length:
-                        score -= 30.0
+                        # WE'RE SMALLER - AVOID AT ALL COSTS!
+                        score -= 500.0
+                        print(f"  ⚠️ HEAD-TO-HEAD DANGER: We're smaller ({my_length} vs {enemy_length}) - FLEE!")
+            
+            # Check if we're moving adjacent to enemy head (risky positioning)
+            distance_to_enemy = self.manhattan_distance(pos, enemy_head)
+            if distance_to_enemy == 1 and pos not in enemy_possible_positions:
+                # We're next to enemy but not in direct collision path
+                if my_length > enemy_length:
+                    # We're bigger - cut them off!
+                    score += 80.0
+                    print(f"  ✂️ CUTTING OFF smaller enemy ({my_length} vs {enemy_length})")
+                elif my_length <= enemy_length:
+                    # We're same size or smaller - be cautious
+                    score -= 60.0
+                    print(f"  🚨 Too close to bigger/equal enemy ({my_length} vs {enemy_length})")
+            
+            # Predict if enemy might move toward us next turn
+            if distance_to_enemy == 2:
+                # Check if moving here puts us on a collision course
+                for enemy_move in enemy_possible_positions:
+                    if self.manhattan_distance(pos, enemy_move) == 1:
+                        # Potential future head-to-head
+                        if my_length > enemy_length:
+                            score += 50.0  # Good - we want this
+                        elif my_length <= enemy_length:
+                            score -= 80.0  # Bad - avoid this
         
         return score
 
@@ -368,28 +402,47 @@ class BattlesnakeLogic:
         return abs(pos1[0] - pos2[0]) + abs(pos1[1] - pos2[1])
 
     def adjust_strategy(self, my_snake: Dict, board: Dict):
-        """Dynamically adjust weights based on snake health and length"""
+        """Dynamically adjust weights based on snake health, length, and competitive positioning"""
         health = my_snake['health']
         length = len(my_snake['body'])
         
         self.weights = self.base_weights.copy()
         
-        if (health >= self.strategy_thresholds['high_health'] and 
+        # Check if we're the biggest snake (or tied for biggest)
+        my_length = len(my_snake['body'])
+        enemy_snakes = [s for s in board['snakes'] if s['id'] != my_snake['id']]
+        
+        is_biggest = True
+        if enemy_snakes:
+            max_enemy_length = max(len(s['body']) for s in enemy_snakes)
+            is_biggest = my_length >= max_enemy_length
+        
+        # DOMINANT STRATEGY: If we're the biggest and healthy, be aggressive
+        if is_biggest and health >= 50 and length >= 5:
+            self.apply_dominant_strategy()
+            print(f"  🏆 DOMINANT MODE: Biggest snake (L:{length}), hunt enemies!")
+        
+        # Strategy 1: High health + Short length = AGGRESSIVE
+        elif (health >= self.strategy_thresholds['high_health'] and 
             length <= self.strategy_thresholds['short_length']):
             self.apply_aggressive_strategy()
             
+        # Strategy 2: Low health + Short length = FOOD PRIORITY
         elif (health <= self.strategy_thresholds['low_health'] and 
               length <= self.strategy_thresholds['short_length']):
             self.apply_food_priority_strategy()
             
+        # Strategy 3: Low health + Long length = DEFENSIVE
         elif (health <= self.strategy_thresholds['low_health'] and 
               length >= self.strategy_thresholds['long_length']):
             self.apply_defensive_strategy()
             
+        # Strategy 4: High health + Long length = TERRITORIAL
         elif (health >= self.strategy_thresholds['high_health'] and 
               length >= self.strategy_thresholds['long_length']):
             self.apply_territorial_strategy()
             
+        # Default: Moderate health/length = BALANCED
         else:
             self.apply_balanced_strategy()
 
@@ -400,6 +453,16 @@ class BattlesnakeLogic:
             'food_attraction': 35.0,
             'space_control': 25.0,
             'center_attraction': 10.0,
+        })
+
+    def apply_dominant_strategy(self):
+        """When we're the biggest snake - seek out and eliminate enemies"""
+        self.weights.update({
+            'avoid_enemies': 20.0,       # Low avoidance - we want to confront
+            'head_to_head': 50.0,        # POSITIVE score for head-to-heads (we win them)
+            'food_attraction': 25.0,     # Moderate food seeking
+            'space_control': 20.0,       # Some space control
+            'center_attraction': 15.0,   # Control center for dominance
         })
 
     def apply_food_priority_strategy(self):
@@ -436,6 +499,11 @@ class BattlesnakeLogic:
         """Get a description of the current strategy"""
         health = my_snake['health']
         length = len(my_snake['body'])
+        
+        # Check dominant mode separately since it has board-dependent logic
+        # For display purposes, we'll check if head_to_head weight is positive
+        if self.weights.get('head_to_head', -50) > 0:
+            return f"DOMINANT (H:{health}, L:{length})"
         
         if (health >= self.strategy_thresholds['high_health'] and 
             length <= self.strategy_thresholds['short_length']):
