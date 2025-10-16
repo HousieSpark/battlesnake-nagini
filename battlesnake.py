@@ -70,6 +70,10 @@ class BattlesnakeLogic:
             new_pos = self.get_new_position(head, direction)
             score = 0.0
             
+            # CRITICAL: Extra penalty for risky equal-length scenarios
+            equal_length_penalty = self.calculate_equal_length_danger(new_pos, my_snake, board)
+            score += equal_length_penalty
+            
             # Add wall proximity penalty
             wall_proximity_score = self.calculate_wall_proximity_score(new_pos, board)
             score += wall_proximity_score
@@ -163,6 +167,34 @@ class BattlesnakeLogic:
         """Check if position is outside board boundaries"""
         x, y = pos
         return x < 0 or x >= board['width'] or y < 0 or y >= board['height']
+
+    def calculate_equal_length_danger(self, pos: Tuple[int, int], my_snake: Dict, board: Dict) -> float:
+        """Extra penalty for moving near equal-length snakes to avoid tie deaths"""
+        my_length = len(my_snake['body'])
+        penalty = 0.0
+        
+        for snake in board['snakes']:
+            if snake['id'] == my_snake['id']:
+                continue
+            
+            enemy_length = len(snake['body'])
+            
+            # Only care about equal-length snakes (tie scenarios)
+            if enemy_length == my_length:
+                enemy_head = (snake['head']['x'], snake['head']['y'])
+                distance = self.manhattan_distance(pos, enemy_head)
+                
+                # Very close to equal-length enemy - dangerous!
+                if distance == 1:
+                    penalty -= 300.0  # Extra penalty on top of head-to-head calculation
+                    print(f"  ⚠️⚠️ EXTREME TIE DANGER: Distance 1 from equal snake!")
+                elif distance == 2:
+                    penalty -= 150.0
+                    print(f"  ⚠️ HIGH TIE RISK: Distance 2 from equal snake")
+                elif distance == 3:
+                    penalty -= 50.0
+        
+        return penalty
 
     def calculate_wall_proximity_score(self, pos: Tuple[int, int], board: Dict) -> float:
         """Penalize positions near walls"""
@@ -348,9 +380,17 @@ class BattlesnakeLogic:
             enemy_possible_positions = []
             for direction in self.directions:
                 enemy_next_pos = self.get_new_position(snake['head'], direction)
-                # Check if enemy can actually move there
-                if not self.is_out_of_bounds(enemy_next_pos, {'width': 11, 'height': 11}):
-                    enemy_possible_positions.append(enemy_next_pos)
+                # Check if enemy can actually move there (basic safety check)
+                x, y = enemy_next_pos
+                if not (x < 0 or x >= 11 or y < 0 or y >= 11):
+                    # Also check they won't hit their own body
+                    hit_body = False
+                    for seg in snake['body'][:-1]:
+                        if enemy_next_pos == (seg['x'], seg['y']):
+                            hit_body = True
+                            break
+                    if not hit_body:
+                        enemy_possible_positions.append(enemy_next_pos)
             
             # Check if we're moving to a position where enemy could also move (head-to-head collision)
             if pos in enemy_possible_positions:
@@ -360,16 +400,27 @@ class BattlesnakeLogic:
                 if distance_between_heads == 2:  # We're 2 steps apart, moving toward each other
                     if my_length > enemy_length:
                         # WE'RE BIGGER - AGGRESSIVELY SEEK THIS COLLISION!
-                        score += 300.0
+                        score += 400.0
                         print(f"  💪 HEAD-TO-HEAD ADVANTAGE: We're bigger ({my_length} vs {enemy_length}) - ATTACK!")
                     elif my_length == enemy_length:
-                        # EQUAL SIZE - Both die, avoid slightly
-                        score -= 100.0
-                        print(f"  ⚖️ HEAD-TO-HEAD TIE: Equal size ({my_length}) - AVOID mutual destruction")
+                        # EQUAL SIZE - Both die, MUST AVOID AT ALL COSTS!
+                        score -= 800.0  # Massive penalty - this is mutual destruction
+                        print(f"  ☠️ HEAD-TO-HEAD TIE RISK: Equal size ({my_length}) - AVOID MUTUAL DESTRUCTION!")
                     else:
                         # WE'RE SMALLER - AVOID AT ALL COSTS!
-                        score -= 500.0
+                        score -= 600.0
                         print(f"  ⚠️ HEAD-TO-HEAD DANGER: We're smaller ({my_length} vs {enemy_length}) - FLEE!")
+                else:
+                    # We're adjacent but checking for potential collision
+                    if my_length > enemy_length:
+                        score += 200.0
+                        print(f"  ✅ Can win head-to-head: bigger ({my_length} vs {enemy_length})")
+                    elif my_length == enemy_length:
+                        score -= 400.0
+                        print(f"  ⚠️ Tie risk nearby: equal size ({my_length})")
+                    else:
+                        score -= 300.0
+                        print(f"  ⚠️ Lose risk nearby: smaller ({my_length} vs {enemy_length})")
             
             # Check if we're moving adjacent to enemy head (risky positioning)
             distance_to_enemy = self.manhattan_distance(pos, enemy_head)
@@ -377,23 +428,30 @@ class BattlesnakeLogic:
                 # We're next to enemy but not in direct collision path
                 if my_length > enemy_length:
                     # We're bigger - cut them off!
-                    score += 80.0
+                    score += 100.0
                     print(f"  ✂️ CUTTING OFF smaller enemy ({my_length} vs {enemy_length})")
-                elif my_length <= enemy_length:
-                    # We're same size or smaller - be cautious
-                    score -= 60.0
-                    print(f"  🚨 Too close to bigger/equal enemy ({my_length} vs {enemy_length})")
+                elif my_length == enemy_length:
+                    # Equal size - be very cautious, they might turn toward us
+                    score -= 150.0
+                    print(f"  ⚖️ Caution: Next to equal-size enemy ({my_length})")
+                else:
+                    # We're smaller - keep distance
+                    score -= 100.0
+                    print(f"  🚨 Too close to bigger enemy ({my_length} vs {enemy_length})")
             
-            # Predict if enemy might move toward us next turn
+            # Predict if enemy might move toward us next turn (looking ahead)
             if distance_to_enemy == 2:
                 # Check if moving here puts us on a collision course
                 for enemy_move in enemy_possible_positions:
                     if self.manhattan_distance(pos, enemy_move) == 1:
                         # Potential future head-to-head
                         if my_length > enemy_length:
-                            score += 50.0  # Good - we want this
-                        elif my_length <= enemy_length:
-                            score -= 80.0  # Bad - avoid this
+                            score += 80.0  # Good - we want this
+                        elif my_length == enemy_length:
+                            score -= 200.0  # Bad - could lead to tie
+                            print(f"  🔮 Future tie risk with equal enemy")
+                        else:
+                            score -= 120.0  # Bad - avoid this
         
         return score
 
@@ -469,7 +527,7 @@ class BattlesnakeLogic:
         self.weights.update({
             'food_attraction': 60.0,
             'avoid_enemies': 120.0,
-            'head_to_head': -80.0,
+            'head_to_head': -120.0,     # Increased penalty - we're weak, avoid all confrontations
             'space_control': 5.0,
             'center_attraction': 2.0,
         })
