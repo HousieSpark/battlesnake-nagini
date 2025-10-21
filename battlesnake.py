@@ -196,6 +196,50 @@ class BattlesnakeLogic:
         
         return penalty
 
+    def calculate_future_space_score(self, pos: Tuple[int, int], my_snake: Dict, board: Dict) -> float:
+        """Look ahead to see if this move leads to progressively tighter spaces (spiral of death)"""
+        body_length = len(my_snake['body'])
+        
+        # Only do this expensive check for longer snakes
+        if body_length < 6:
+            return 0.0
+        
+        # Simulate moving to this position and check future escape options
+        future_escape_count = 0
+        tight_futures = 0
+        
+        for direction in self.directions:
+            future_pos = self.get_new_position({'x': pos[0], 'y': pos[1]}, direction)
+            
+            if not self.is_position_safe(future_pos, my_snake, board):
+                continue
+            
+            future_escape_count += 1
+            
+            # Check how many moves we'd have from THAT position
+            future_future_count = 0
+            for direction2 in self.directions:
+                future_future_pos = self.get_new_position({'x': future_pos[0], 'y': future_pos[1]}, direction2)
+                if self.is_position_safe(future_future_pos, my_snake, board):
+                    future_future_count += 1
+            
+            # If any future position has 0-1 escapes, that's a warning sign
+            if future_future_count <= 1:
+                tight_futures += 1
+        
+        # If most of our future options lead to tight spaces, heavily penalize
+        if future_escape_count > 0:
+            tight_ratio = tight_futures / future_escape_count
+            
+            if tight_ratio >= 0.75:  # 3 out of 4 futures are tight
+                return -300.0
+            elif tight_ratio >= 0.5:  # Half are tight
+                return -150.0
+            elif tight_ratio >= 0.25:
+                return -50.0
+        
+        return 0.0
+
     def calculate_wall_proximity_score(self, pos: Tuple[int, int], board: Dict) -> float:
         """Penalize positions near walls"""
         x, y = pos
@@ -220,19 +264,50 @@ class BattlesnakeLogic:
             return 0.0
 
     def calculate_trap_score(self, pos: Tuple[int, int], my_snake: Dict, board: Dict) -> float:
-        """Detect if a move leads to a trap/dead end using limited flood fill"""
-        accessible = self.limited_flood_fill(pos, my_snake, board, limit=len(my_snake['body']) + 3)
-        
+        """Detect if a move leads to a trap/dead end using flood fill - ENHANCED for long snakes"""
         body_length = len(my_snake['body'])
         
-        if len(accessible) < body_length:
-            return -1000.0
-        elif len(accessible) < body_length * 1.5:
-            return -300.0
-        elif len(accessible) < body_length * 2:
-            return -100.0
+        # Use larger limit for longer snakes to properly assess space
+        search_limit = max(body_length * 3, 50)
+        accessible = self.limited_flood_fill(pos, my_snake, board, limit=search_limit)
+        
+        accessible_count = len(accessible)
+        
+        # For long snakes, we need MUCH more space to survive
+        if body_length >= 10:
+            # Long snake - need lots of space
+            if accessible_count < body_length:
+                return -2000.0  # Certain death
+            elif accessible_count < body_length * 1.5:
+                return -800.0   # Very likely trapped
+            elif accessible_count < body_length * 2:
+                return -400.0   # Risky
+            elif accessible_count < body_length * 2.5:
+                return -150.0   # Somewhat tight
+            else:
+                return 0.0      # Good space
+        elif body_length >= 6:
+            # Medium snake
+            if accessible_count < body_length:
+                return -1500.0
+            elif accessible_count < body_length * 1.5:
+                return -500.0
+            elif accessible_count < body_length * 2:
+                return -200.0
+            elif accessible_count < body_length * 2.5:
+                return -50.0
+            else:
+                return 0.0
         else:
-            return 0.0
+            # Short snake - original logic
+            if accessible_count < body_length:
+                return -1000.0
+            elif accessible_count < body_length * 1.5:
+                return -300.0
+            elif accessible_count < body_length * 2:
+                return -100.0
+            else:
+                return 0.0
 
     def limited_flood_fill(self, start_pos: Tuple[int, int], my_snake: Dict, board: Dict, limit: int = 50) -> set:
         """Fast flood fill with depth limit for trap detection"""
@@ -292,8 +367,9 @@ class BattlesnakeLogic:
         return 0.0
 
     def calculate_escape_route_score(self, pos: Tuple[int, int], my_snake: Dict, board: Dict) -> float:
-        """Score based on number of escape routes from this position"""
+        """Score based on number of escape routes - CRITICAL for long snakes"""
         escape_count = 0
+        body_length = len(my_snake['body'])
         
         for direction in self.directions:
             future_pos = self.get_new_position({'x': pos[0], 'y': pos[1]}, direction)
@@ -301,16 +377,43 @@ class BattlesnakeLogic:
             if self.is_position_safe(future_pos, my_snake, board):
                 escape_count += 1
         
-        if escape_count == 0:
-            return -800.0
-        elif escape_count == 1:
-            return -200.0
-        elif escape_count == 2:
-            return 0.0
-        elif escape_count == 3:
-            return 50.0
+        # For long snakes, having multiple escape routes is CRITICAL
+        if body_length >= 10:
+            # Long snake - need maximum mobility
+            if escape_count == 0:
+                return -1500.0  # Death trap!
+            elif escape_count == 1:
+                return -600.0   # Extremely risky
+            elif escape_count == 2:
+                return -100.0   # Still risky
+            elif escape_count == 3:
+                return 150.0    # Good
+            else:
+                return 300.0    # Excellent
+        elif body_length >= 6:
+            # Medium snake
+            if escape_count == 0:
+                return -1000.0
+            elif escape_count == 1:
+                return -400.0
+            elif escape_count == 2:
+                return 0.0
+            elif escape_count == 3:
+                return 100.0
+            else:
+                return 200.0
         else:
-            return 100.0
+            # Short snake - original logic
+            if escape_count == 0:
+                return -800.0
+            elif escape_count == 1:
+                return -200.0
+            elif escape_count == 2:
+                return 0.0
+            elif escape_count == 3:
+                return 50.0
+            else:
+                return 100.0
     
     def is_position_safe(self, pos: Tuple[int, int], my_snake: Dict, board: Dict) -> bool:
         """Quick check if a position is safe"""
