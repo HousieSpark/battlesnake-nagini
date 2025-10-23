@@ -107,7 +107,7 @@ class BattlesnakeLogic:
                     score += self.calculate_space_score(new_pos, my_snake, board)
                     score += self.calculate_center_score(new_pos, board)
                     score += self.calculate_enemy_avoidance_score(new_pos, board['snakes'], my_snake)
-                    score += self.calculate_head_to_head_score(new_pos, board['snakes'], my_snake)
+                    score += self.calculate_head_to_head_score(new_pos, board['snakes'], my_snake, board)
             
             except Exception as e:
                 print(f"  ⚠️ ERROR scoring {direction}: {e}")
@@ -135,20 +135,26 @@ class BattlesnakeLogic:
         """Get all moves that don't immediately kill us (walls, snake bodies)"""
         safe = []
         
+        # Get board dimensions safely
+        board_width = board.get('width', 11)
+        board_height = board.get('height', 11)
+        
+        print(f"  Checking moves from ({head['x']}, {head['y']}) on {board_width}x{board_height} board")
+        
         for direction in self.directions:
             new_pos = self.get_new_position(head, direction)
             x, y = new_pos
             
             # Check walls - THIS IS CRITICAL
-            if x < 0 or x >= board['width'] or y < 0 or y >= board['height']:
-                print(f"  {direction} -> OUT OF BOUNDS ({x}, {y})")
+            if x < 0 or x >= board_width or y < 0 or y >= board_height:
+                print(f"  {direction} -> OUT OF BOUNDS ({x}, {y}) [Board: {board_width}x{board_height}]")
                 continue
             
             # Check own body (excluding tail)
             hit_self = False
             for i, segment in enumerate(my_snake['body'][:-1]):
                 if new_pos == (segment['x'], segment['y']):
-                    print(f"  {direction} -> HIT OWN BODY at ({x}, {y})")
+                    print(f"  {direction} -> HIT OWN BODY at ({x}, {y}) [segment {i}]")
                     hit_self = True
                     break
             
@@ -157,7 +163,7 @@ class BattlesnakeLogic:
             
             # Check enemy bodies
             hit_enemy = False
-            for snake in board['snakes']:
+            for snake in board.get('snakes', []):
                 if snake['id'] == my_snake['id']:
                     continue
                 for i, segment in enumerate(snake['body'][:-1]):
@@ -185,7 +191,9 @@ class BattlesnakeLogic:
     def is_out_of_bounds(self, pos: Tuple[int, int], board: Dict) -> bool:
         """Check if position is outside board boundaries"""
         x, y = pos
-        return x < 0 or x >= board['width'] or y < 0 or y >= board['height']
+        width = board.get('width', 11)
+        height = board.get('height', 11)
+        return x < 0 or x >= width or y < 0 or y >= height
 
     def calculate_equal_length_danger(self, pos: Tuple[int, int], my_snake: Dict, board: Dict) -> float:
         """Extra penalty for moving near equal-length snakes to avoid tie deaths"""
@@ -375,7 +383,8 @@ class BattlesnakeLogic:
     def get_wall_proximity(self, pos: Tuple[int, int], board: Dict) -> int:
         """Get minimum distance to any wall"""
         x, y = pos
-        width, height = board['width'], board['height']
+        width = board.get('width', 11)
+        height = board.get('height', 11)
         
         dist_from_left = x
         dist_from_right = width - 1 - x
@@ -387,7 +396,8 @@ class BattlesnakeLogic:
     def calculate_wall_proximity_score(self, pos: Tuple[int, int], board: Dict) -> float:
         """Penalize positions near walls"""
         x, y = pos
-        width, height = board['width'], board['height']
+        width = board.get('width', 11)
+        height = board.get('height', 11)
         
         # Calculate distance from each wall
         dist_from_left = x
@@ -564,11 +574,13 @@ class BattlesnakeLogic:
         x, y = pos
         
         # Check bounds - CRITICAL FIX
-        if x < 0 or x >= board['width'] or y < 0 or y >= board['height']:
+        width = board.get('width', 11)
+        height = board.get('height', 11)
+        if x < 0 or x >= width or y < 0 or y >= height:
             return False
         
         # Check if occupied by any snake body
-        for snake in board['snakes']:
+        for snake in board.get('snakes', []):
             for segment in snake['body'][:-1]:
                 if pos == (segment['x'], segment['y']):
                     return False
@@ -610,11 +622,15 @@ class BattlesnakeLogic:
         
         return score
 
-    def calculate_head_to_head_score(self, pos: Tuple[int, int], snakes: List[Dict], my_snake: Dict) -> float:
+    def calculate_head_to_head_score(self, pos: Tuple[int, int], snakes: List[Dict], my_snake: Dict, board: Dict) -> float:
         """Calculate score for head-to-head encounters with aggressive winning strategy"""
         score = 0.0
         my_length = len(my_snake['body'])
         my_head = (my_snake['head']['x'], my_snake['head']['y'])
+        
+        # Get board dimensions
+        width = board.get('width', 11)
+        height = board.get('height', 11)
         
         for snake in snakes:
             if snake['id'] == my_snake['id']:
@@ -630,7 +646,7 @@ class BattlesnakeLogic:
                 enemy_next_pos = self.get_new_position(snake['head'], direction)
                 # Check if enemy can actually move there (basic safety check)
                 x, y = enemy_next_pos
-                if not (x < 0 or x >= 11 or y < 0 or y >= 11):
+                if not (x < 0 or x >= width or y < 0 or y >= height):
                     # Also check they won't hit their own body
                     hit_body = False
                     for seg in snake['body'][:-1]:
