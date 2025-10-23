@@ -9,7 +9,7 @@ class BattlesnakeLogic:
             'avoid_walls': 100.0,
             'avoid_body': 100.0,
             'avoid_enemies': 80.0,
-            'food_attraction': 20.0,
+            'food_attraction': 30.0,
             'center_attraction': 5.0,
             'space_control': 15.0,
             'head_to_head': -50.0,
@@ -45,7 +45,6 @@ class BattlesnakeLogic:
         print(f"\n=== TURN {game_state.get('turn', 0)} ===")
         print(f"Head position: ({head['x']}, {head['y']})")
         print(f"Board size: {board['width']}x{board['height']}")
-        print(f"Health: {my_snake['health']}, Length: {len(my_snake['body'])}")
         
         # FIRST: Get all safe moves (no walls, no immediate death)
         safe_moves = self.get_safe_moves(head, my_snake, board)
@@ -71,58 +70,44 @@ class BattlesnakeLogic:
             new_pos = self.get_new_position(head, direction)
             score = 0.0
             
-            try:
-                # CRITICAL: Extra penalty for risky equal-length scenarios
-                equal_length_penalty = self.calculate_equal_length_danger(new_pos, my_snake, board)
-                score += equal_length_penalty
-                
-                # Add wall proximity penalty
-                wall_proximity_score = self.calculate_wall_proximity_score(new_pos, board)
-                score += wall_proximity_score
-                
-                # Check for traps and dead ends
-                trap_penalty = self.calculate_trap_score(new_pos, my_snake, board)
-                score += trap_penalty
-                
-                # Skip heavy calculations if trapped badly
-                if trap_penalty > -500:
-                    # Calculate escape routes
-                    escape_score = self.calculate_escape_route_score(new_pos, my_snake, board)
-                    score += escape_score
-                    
-                    # Look ahead for future traps (important for long snakes)
-                    future_space_score = self.calculate_future_space_score(new_pos, my_snake, board)
-                    score += future_space_score
-                    
-                    # Smart tail chasing
-                    tail_score = self.calculate_tail_chase_score(new_pos, my_snake, board)
-                    score += tail_score
-                    
-                    # HUNTER MODE: If we're significantly bigger, hunt enemies!
-                    hunter_score = self.calculate_hunter_score(new_pos, my_snake, board)
-                    score += hunter_score
-                    
-                    # Strategic factors
-                    score += self.calculate_food_score(new_pos, board['food'])
-                    score += self.calculate_space_score(new_pos, my_snake, board)
-                    score += self.calculate_center_score(new_pos, board)
-                    score += self.calculate_enemy_avoidance_score(new_pos, board['snakes'], my_snake)
-                    score += self.calculate_head_to_head_score(new_pos, board['snakes'], my_snake, board)
+            # CRITICAL: Extra penalty for risky equal-length scenarios
+            equal_length_penalty = self.calculate_equal_length_danger(new_pos, my_snake, board)
+            score += equal_length_penalty
             
-            except Exception as e:
-                print(f"  ⚠️ ERROR scoring {direction}: {e}")
-                score = -999999.0  # Heavily penalize moves that cause errors
+            # Add wall proximity penalty
+            wall_proximity_score = self.calculate_wall_proximity_score(new_pos, board)
+            score += wall_proximity_score
+            
+            # Check for traps and dead ends
+            trap_penalty = self.calculate_trap_score(new_pos, my_snake, board)
+            score += trap_penalty
+            
+            # Skip heavy calculations if trapped badly
+            if trap_penalty > -500:
+                # Calculate escape routes
+                escape_score = self.calculate_escape_route_score(new_pos, my_snake, board)
+                score += escape_score
+                
+                # Look ahead for future traps (important for long snakes)
+                future_space_score = self.calculate_future_space_score(new_pos, my_snake, board)
+                score += future_space_score
+                
+                # Smart tail chasing
+                tail_score = self.calculate_tail_chase_score(new_pos, my_snake, board)
+                score += tail_score
+                
+                # Strategic factors
+                score += self.calculate_food_score(new_pos, board['food'])
+                score += self.calculate_space_score(new_pos, my_snake, board)
+                score += self.calculate_center_score(new_pos, board)
+                score += self.calculate_enemy_avoidance_score(new_pos, board['snakes'], my_snake)
+                score += self.calculate_head_to_head_score(new_pos, board['snakes'], my_snake)
             
             move_scores[direction] = score
         
         # Sort by score
         sorted_moves = sorted(move_scores.items(), key=lambda x: x[1], reverse=True)
         best_move = sorted_moves[0][0]
-        
-        # Safety check: Make sure best move is actually in safe_moves
-        if best_move not in safe_moves:
-            print(f"⚠️ WARNING: Best move {best_move} not in safe moves, using first safe move")
-            best_move = safe_moves[0]
         
         strategy = self.get_current_strategy(my_snake)
         print(f"Strategy: {strategy}")
@@ -135,26 +120,20 @@ class BattlesnakeLogic:
         """Get all moves that don't immediately kill us (walls, snake bodies)"""
         safe = []
         
-        # Get board dimensions safely
-        board_width = board.get('width', 11)
-        board_height = board.get('height', 11)
-        
-        print(f"  Checking moves from ({head['x']}, {head['y']}) on {board_width}x{board_height} board")
-        
         for direction in self.directions:
             new_pos = self.get_new_position(head, direction)
             x, y = new_pos
             
             # Check walls - THIS IS CRITICAL
-            if x < 0 or x >= board_width or y < 0 or y >= board_height:
-                print(f"  {direction} -> OUT OF BOUNDS ({x}, {y}) [Board: {board_width}x{board_height}]")
+            if x < 0 or x >= board['width'] or y < 0 or y >= board['height']:
+                print(f"  {direction} -> OUT OF BOUNDS ({x}, {y})")
                 continue
             
             # Check own body (excluding tail)
             hit_self = False
             for i, segment in enumerate(my_snake['body'][:-1]):
                 if new_pos == (segment['x'], segment['y']):
-                    print(f"  {direction} -> HIT OWN BODY at ({x}, {y}) [segment {i}]")
+                    print(f"  {direction} -> HIT OWN BODY at ({x}, {y})")
                     hit_self = True
                     break
             
@@ -163,7 +142,7 @@ class BattlesnakeLogic:
             
             # Check enemy bodies
             hit_enemy = False
-            for snake in board.get('snakes', []):
+            for snake in board['snakes']:
                 if snake['id'] == my_snake['id']:
                     continue
                 for i, segment in enumerate(snake['body'][:-1]):
@@ -191,9 +170,7 @@ class BattlesnakeLogic:
     def is_out_of_bounds(self, pos: Tuple[int, int], board: Dict) -> bool:
         """Check if position is outside board boundaries"""
         x, y = pos
-        width = board.get('width', 11)
-        height = board.get('height', 11)
-        return x < 0 or x >= width or y < 0 or y >= height
+        return x < 0 or x >= board['width'] or y < 0 or y >= board['height']
 
     def calculate_equal_length_danger(self, pos: Tuple[int, int], my_snake: Dict, board: Dict) -> float:
         """Extra penalty for moving near equal-length snakes to avoid tie deaths"""
@@ -213,7 +190,7 @@ class BattlesnakeLogic:
                 
                 # Very close to equal-length enemy - dangerous!
                 if distance == 1:
-                    penalty -= 300.0  # Extra penalty on top of head-to-head calculation
+                    penalty -= 300.0
                     print(f"  ⚠️⚠️ EXTREME TIE DANGER: Distance 1 from equal snake!")
                 elif distance == 2:
                     penalty -= 150.0
@@ -223,181 +200,10 @@ class BattlesnakeLogic:
         
         return penalty
 
-    def calculate_future_space_score(self, pos: Tuple[int, int], my_snake: Dict, board: Dict) -> float:
-        """Look ahead to see if this move leads to progressively tighter spaces (spiral of death)"""
-        body_length = len(my_snake['body'])
-        
-        # Only do this expensive check for longer snakes
-        if body_length < 6:
-            return 0.0
-        
-        # Simulate moving to this position and check future escape options
-        future_escape_count = 0
-        tight_futures = 0
-        
-        for direction in self.directions:
-            future_pos = self.get_new_position({'x': pos[0], 'y': pos[1]}, direction)
-            
-            if not self.is_position_safe(future_pos, my_snake, board):
-                continue
-            
-            future_escape_count += 1
-            
-            # Check how many moves we'd have from THAT position
-            future_future_count = 0
-            for direction2 in self.directions:
-                future_future_pos = self.get_new_position({'x': future_pos[0], 'y': future_pos[1]}, direction2)
-                if self.is_position_safe(future_future_pos, my_snake, board):
-                    future_future_count += 1
-            
-            # If any future position has 0-1 escapes, that's a warning sign
-            if future_future_count <= 1:
-                tight_futures += 1
-        
-        # If most of our future options lead to tight spaces, heavily penalize
-        if future_escape_count > 0:
-            tight_ratio = tight_futures / future_escape_count
-            
-            if tight_ratio >= 0.75:  # 3 out of 4 futures are tight
-                return -300.0
-            elif tight_ratio >= 0.5:  # Half are tight
-                return -150.0
-            elif tight_ratio >= 0.25:
-                return -50.0
-        
-        return 0.0
-
-    def calculate_hunter_score(self, pos: Tuple[int, int], my_snake: Dict, board: Dict) -> float:
-        """HUNTER MODE: Aggressively pursue and trap smaller snakes when we have 2+ length advantage"""
-        my_length = len(my_snake['body'])
-        my_health = my_snake['health']
-        score = 0.0
-        
-        # Need decent health to be aggressive
-        if my_health < 30:
-            return 0.0
-        
-        enemy_snakes = [s for s in board['snakes'] if s['id'] != my_snake['id']]
-        if not enemy_snakes:
-            return 0.0
-        
-        for enemy in enemy_snakes:
-            enemy_length = len(enemy['body'])
-            enemy_head = (enemy['head']['x'], enemy['head']['y'])
-            
-            # Only hunt if we're 2+ spaces longer
-            length_advantage = my_length - enemy_length
-            if length_advantage < 2:
-                continue
-            
-            # We're the hunter! Aggressively pursue
-            distance_to_enemy = self.manhattan_distance(pos, enemy_head)
-            
-            # Calculate enemy's available space (are they trapped?)
-            try:
-                enemy_space = len(self.limited_flood_fill(enemy_head, enemy, board, limit=40))
-                enemy_is_trapped = enemy_space < enemy_length * 2
-            except:
-                enemy_space = 100
-                enemy_is_trapped = False
-            
-            # AGGRESSIVE HEAD HUNTING
-            if distance_to_enemy <= 2:
-                # Very close - go for the kill!
-                bonus = 300.0 * (length_advantage / 2.0)  # Scale with advantage
-                score += bonus
-                print(f"  🎯 HUNTING: Close to smaller enemy (L:{my_length} vs {enemy_length}) - distance {distance_to_enemy}")
-            elif distance_to_enemy <= 4:
-                # Moving closer - good
-                bonus = 150.0 * (length_advantage / 2.0)
-                score += bonus
-                print(f"  🏹 PURSUING: Smaller enemy nearby (L:{my_length} vs {enemy_length}) - distance {distance_to_enemy}")
-            elif distance_to_enemy <= 6:
-                # In pursuit range
-                bonus = 80.0 * (length_advantage / 2.0)
-                score += bonus
-            
-            # BONUS: If enemy is already trapped, move to cut off escape routes
-            if enemy_is_trapped and distance_to_enemy <= 4:
-                score += 200.0
-                print(f"  🕸️ TRAPPING: Enemy is trapped with low space ({enemy_space} tiles)")
-            
-            # CUTOFF STRATEGY: Try to position between enemy and open space
-            try:
-                enemy_best_escape = self.find_best_escape_direction(enemy_head, enemy, board)
-                if enemy_best_escape:
-                    # Check if we're moving to block their escape
-                    if self.is_blocking_escape(pos, enemy_head, enemy_best_escape):
-                        score += 250.0
-                        print(f"  🚧 BLOCKING: Cutting off enemy's best escape route!")
-            except Exception as e:
-                print(f"  Warning: Error in escape calculation: {e}")
-                pass
-            
-            # CORNER PUSHING: Bonus for pushing enemy toward walls
-            try:
-                enemy_wall_proximity = self.get_wall_proximity(enemy_head, board)
-                if enemy_wall_proximity <= 2 and distance_to_enemy <= 3:
-                    # Enemy is near wall and we're close - push them!
-                    score += 120.0
-                    print(f"  🧱 CORNERING: Pushing enemy toward wall (wall dist: {enemy_wall_proximity})")
-            except Exception as e:
-                print(f"  Warning: Error in wall proximity: {e}")
-                pass
-        
-        return score
-
-    def find_best_escape_direction(self, pos: Tuple[int, int], snake: Dict, board: Dict) -> Optional[Tuple[int, int]]:
-        """Find which direction has the most open space for a snake"""
-        best_direction = None
-        max_space = 0
-        
-        for direction in self.directions:
-            next_pos = self.get_new_position({'x': pos[0], 'y': pos[1]}, direction)
-            
-            if not self.is_position_safe(next_pos, snake, board):
-                continue
-            
-            # Check space in this direction
-            space = len(self.limited_flood_fill(next_pos, snake, board, limit=30))
-            if space > max_space:
-                max_space = space
-                best_direction = next_pos
-        
-        return best_direction
-
-    def is_blocking_escape(self, our_pos: Tuple[int, int], enemy_pos: Tuple[int, int], 
-                          enemy_escape_pos: Tuple[int, int]) -> bool:
-        """Check if our position blocks the path from enemy to their best escape"""
-        if not enemy_escape_pos:
-            return False
-        
-        # Check if we're on the line between enemy and their escape
-        # Simple check: if we're closer to their escape than they are
-        our_dist_to_escape = self.manhattan_distance(our_pos, enemy_escape_pos)
-        enemy_dist_to_escape = self.manhattan_distance(enemy_pos, enemy_escape_pos)
-        
-        # We're blocking if we're between them and their escape, or very close to it
-        return our_dist_to_escape <= enemy_dist_to_escape and our_dist_to_escape <= 2
-
-    def get_wall_proximity(self, pos: Tuple[int, int], board: Dict) -> int:
-        """Get minimum distance to any wall"""
-        x, y = pos
-        width = board.get('width', 11)
-        height = board.get('height', 11)
-        
-        dist_from_left = x
-        dist_from_right = width - 1 - x
-        dist_from_bottom = y
-        dist_from_top = height - 1 - y
-        
-        return min(dist_from_left, dist_from_right, dist_from_bottom, dist_from_top)
-
     def calculate_wall_proximity_score(self, pos: Tuple[int, int], board: Dict) -> float:
         """Penalize positions near walls"""
         x, y = pos
-        width = board.get('width', 11)
-        height = board.get('height', 11)
+        width, height = board['width'], board['height']
         
         # Calculate distance from each wall
         dist_from_left = x
@@ -431,15 +237,15 @@ class BattlesnakeLogic:
         if body_length >= 10:
             # Long snake - need lots of space
             if accessible_count < body_length:
-                return -2000.0  # Certain death
+                return -2000.0
             elif accessible_count < body_length * 1.5:
-                return -800.0   # Very likely trapped
+                return -800.0
             elif accessible_count < body_length * 2:
-                return -400.0   # Risky
+                return -400.0
             elif accessible_count < body_length * 2.5:
-                return -150.0   # Somewhat tight
+                return -150.0
             else:
-                return 0.0      # Good space
+                return 0.0
         elif body_length >= 6:
             # Medium snake
             if accessible_count < body_length:
@@ -453,7 +259,7 @@ class BattlesnakeLogic:
             else:
                 return 0.0
         else:
-            # Short snake - original logic
+            # Short snake
             if accessible_count < body_length:
                 return -1000.0
             elif accessible_count < body_length * 1.5:
@@ -497,26 +303,96 @@ class BattlesnakeLogic:
         
         return visited
 
+    def calculate_future_space_score(self, pos: Tuple[int, int], my_snake: Dict, board: Dict) -> float:
+        """Look ahead to see if this move leads to progressively tighter spaces"""
+        body_length = len(my_snake['body'])
+        
+        # Only do this expensive check for longer snakes
+        if body_length < 6:
+            return 0.0
+        
+        # Simulate moving to this position and check future escape options
+        future_escape_count = 0
+        tight_futures = 0
+        
+        for direction in self.directions:
+            future_pos = self.get_new_position({'x': pos[0], 'y': pos[1]}, direction)
+            
+            if not self.is_position_safe(future_pos, my_snake, board):
+                continue
+            
+            future_escape_count += 1
+            
+            # Check how many moves we'd have from THAT position
+            future_future_count = 0
+            for direction2 in self.directions:
+                future_future_pos = self.get_new_position({'x': future_pos[0], 'y': future_pos[1]}, direction2)
+                if self.is_position_safe(future_future_pos, my_snake, board):
+                    future_future_count += 1
+            
+            # If any future position has 0-1 escapes, that's a warning sign
+            if future_future_count <= 1:
+                tight_futures += 1
+        
+        # If most of our future options lead to tight spaces, heavily penalize
+        if future_escape_count > 0:
+            tight_ratio = tight_futures / future_escape_count
+            
+            if tight_ratio >= 0.75:
+                return -300.0
+            elif tight_ratio >= 0.5:
+                return -150.0
+            elif tight_ratio >= 0.25:
+                return -50.0
+        
+        return 0.0
+
     def calculate_tail_chase_score(self, pos: Tuple[int, int], my_snake: Dict, board: Dict) -> float:
-        """Smart tail chasing - follow tail when safe"""
+        """Smart tail chasing - follow tail when safe, CRITICAL for long snakes"""
         tail = my_snake['body'][-1]
         tail_pos = (tail['x'], tail['y'])
+        body_length = len(my_snake['body'])
         
+        # Calculate distance to our tail
         distance_to_tail = self.manhattan_distance(pos, tail_pos)
         
+        # Check if tail will move this turn
         health = my_snake['health']
         tail_will_move = health < 100
         
         if not tail_will_move:
             return 0.0
         
-        accessible = len(self.limited_flood_fill(pos, my_snake, board, limit=30))
+        # Check accessible space
+        accessible = len(self.limited_flood_fill(pos, my_snake, board, limit=50))
+        space_ratio = accessible / body_length if body_length > 0 else 1.0
         
-        if accessible < len(my_snake['body']) * 2:
-            if distance_to_tail <= 2:
-                return 50.0
-            elif distance_to_tail <= 4:
-                return 20.0
+        # For long snakes in tight spaces, tail chasing becomes ESSENTIAL
+        if body_length >= 10:
+            if space_ratio < 2.5:
+                if distance_to_tail == 1:
+                    return 200.0
+                elif distance_to_tail == 2:
+                    return 100.0
+                elif distance_to_tail <= 4:
+                    return 50.0
+            elif space_ratio < 3.5:
+                if distance_to_tail <= 2:
+                    return 80.0
+                elif distance_to_tail <= 3:
+                    return 30.0
+        elif body_length >= 6:
+            if space_ratio < 2.0:
+                if distance_to_tail <= 2:
+                    return 100.0
+                elif distance_to_tail <= 4:
+                    return 40.0
+        else:
+            if space_ratio < 2.0:
+                if distance_to_tail <= 2:
+                    return 50.0
+                elif distance_to_tail <= 4:
+                    return 20.0
         
         return 0.0
 
@@ -533,19 +409,17 @@ class BattlesnakeLogic:
         
         # For long snakes, having multiple escape routes is CRITICAL
         if body_length >= 10:
-            # Long snake - need maximum mobility
             if escape_count == 0:
-                return -1500.0  # Death trap!
+                return -1500.0
             elif escape_count == 1:
-                return -600.0   # Extremely risky
+                return -600.0
             elif escape_count == 2:
-                return -100.0   # Still risky
+                return -100.0
             elif escape_count == 3:
-                return 150.0    # Good
+                return 150.0
             else:
-                return 300.0    # Excellent
+                return 300.0
         elif body_length >= 6:
-            # Medium snake
             if escape_count == 0:
                 return -1000.0
             elif escape_count == 1:
@@ -557,7 +431,6 @@ class BattlesnakeLogic:
             else:
                 return 200.0
         else:
-            # Short snake - original logic
             if escape_count == 0:
                 return -800.0
             elif escape_count == 1:
@@ -573,14 +446,12 @@ class BattlesnakeLogic:
         """Quick check if a position is safe"""
         x, y = pos
         
-        # Check bounds - CRITICAL FIX
-        width = board.get('width', 11)
-        height = board.get('height', 11)
-        if x < 0 or x >= width or y < 0 or y >= height:
+        # Check bounds
+        if x < 0 or x >= board['width'] or y < 0 or y >= board['height']:
             return False
         
         # Check if occupied by any snake body
-        for snake in board.get('snakes', []):
+        for snake in board['snakes']:
             for segment in snake['body'][:-1]:
                 if pos == (segment['x'], segment['y']):
                     return False
@@ -622,15 +493,11 @@ class BattlesnakeLogic:
         
         return score
 
-    def calculate_head_to_head_score(self, pos: Tuple[int, int], snakes: List[Dict], my_snake: Dict, board: Dict) -> float:
+    def calculate_head_to_head_score(self, pos: Tuple[int, int], snakes: List[Dict], my_snake: Dict) -> float:
         """Calculate score for head-to-head encounters with aggressive winning strategy"""
         score = 0.0
         my_length = len(my_snake['body'])
         my_head = (my_snake['head']['x'], my_snake['head']['y'])
-        
-        # Get board dimensions
-        width = board.get('width', 11)
-        height = board.get('height', 11)
         
         for snake in snakes:
             if snake['id'] == my_snake['id']:
@@ -644,10 +511,8 @@ class BattlesnakeLogic:
             enemy_possible_positions = []
             for direction in self.directions:
                 enemy_next_pos = self.get_new_position(snake['head'], direction)
-                # Check if enemy can actually move there (basic safety check)
                 x, y = enemy_next_pos
-                if not (x < 0 or x >= width or y < 0 or y >= height):
-                    # Also check they won't hit their own body
+                if not (x < 0 or x >= 11 or y < 0 or y >= 11):
                     hit_body = False
                     for seg in snake['body'][:-1]:
                         if enemy_next_pos == (seg['x'], seg['y']):
@@ -656,79 +521,59 @@ class BattlesnakeLogic:
                     if not hit_body:
                         enemy_possible_positions.append(enemy_next_pos)
             
-            # Check if we're moving to a position where enemy could also move (head-to-head collision)
+            # Check if we're moving to a position where enemy could also move
             if pos in enemy_possible_positions:
                 distance_between_heads = self.manhattan_distance(my_head, enemy_head)
                 
-                # Direct head-to-head collision scenario
-                if distance_between_heads == 2:  # We're 2 steps apart, moving toward each other
+                if distance_between_heads == 2:
                     if length_advantage >= 2:
-                        # WE HAVE 2+ ADVANTAGE - ULTRA AGGRESSIVE!
                         score += 600.0
-                        print(f"  ⚔️ DOMINATING HEAD-TO-HEAD: Huge advantage ({my_length} vs {enemy_length}) - ATTACK!")
+                        print(f"  ⚔️ DOMINATING HEAD-TO-HEAD: Huge advantage ({my_length} vs {enemy_length})")
                     elif my_length > enemy_length:
-                        # WE'RE BIGGER - AGGRESSIVELY SEEK THIS COLLISION!
                         score += 400.0
-                        print(f"  💪 HEAD-TO-HEAD ADVANTAGE: We're bigger ({my_length} vs {enemy_length}) - ATTACK!")
+                        print(f"  💪 HEAD-TO-HEAD ADVANTAGE: We're bigger ({my_length} vs {enemy_length})")
                     elif my_length == enemy_length:
-                        # EQUAL SIZE - Both die, MUST AVOID AT ALL COSTS!
-                        score -= 800.0  # Massive penalty - this is mutual destruction
-                        print(f"  ☠️ HEAD-TO-HEAD TIE RISK: Equal size ({my_length}) - AVOID MUTUAL DESTRUCTION!")
+                        score -= 800.0
+                        print(f"  ☠️ HEAD-TO-HEAD TIE RISK: Equal size ({my_length})")
                     else:
-                        # WE'RE SMALLER - AVOID AT ALL COSTS!
                         score -= 600.0
-                        print(f"  ⚠️ HEAD-TO-HEAD DANGER: We're smaller ({my_length} vs {enemy_length}) - FLEE!")
+                        print(f"  ⚠️ HEAD-TO-HEAD DANGER: We're smaller ({my_length} vs {enemy_length})")
                 else:
-                    # We're adjacent but checking for potential collision
                     if length_advantage >= 2:
                         score += 300.0
-                        print(f"  ✅ Can dominate head-to-head: much bigger ({my_length} vs {enemy_length})")
                     elif my_length > enemy_length:
                         score += 200.0
-                        print(f"  ✅ Can win head-to-head: bigger ({my_length} vs {enemy_length})")
                     elif my_length == enemy_length:
                         score -= 400.0
-                        print(f"  ⚠️ Tie risk nearby: equal size ({my_length})")
                     else:
                         score -= 300.0
-                        print(f"  ⚠️ Lose risk nearby: smaller ({my_length} vs {enemy_length})")
             
-            # Check if we're moving adjacent to enemy head (risky positioning)
+            # Check if we're moving adjacent to enemy head
             distance_to_enemy = self.manhattan_distance(pos, enemy_head)
             if distance_to_enemy == 1 and pos not in enemy_possible_positions:
-                # We're next to enemy but not in direct collision path
                 if length_advantage >= 2:
-                    # We have big advantage - cut them off aggressively!
                     score += 150.0
-                    print(f"  ✂️ AGGRESSIVELY CUTTING OFF much smaller enemy ({my_length} vs {enemy_length})")
+                    print(f"  ✂️ CUTTING OFF much smaller enemy ({my_length} vs {enemy_length})")
                 elif my_length > enemy_length:
-                    # We're bigger - cut them off!
                     score += 100.0
                     print(f"  ✂️ CUTTING OFF smaller enemy ({my_length} vs {enemy_length})")
                 elif my_length == enemy_length:
-                    # Equal size - be very cautious, they might turn toward us
                     score -= 150.0
-                    print(f"  ⚖️ Caution: Next to equal-size enemy ({my_length})")
                 else:
-                    # We're smaller - keep distance
                     score -= 100.0
-                    print(f"  🚨 Too close to bigger enemy ({my_length} vs {enemy_length})")
             
-            # Predict if enemy might move toward us next turn (looking ahead)
+            # Predict future collision course
             if distance_to_enemy == 2:
-                # Check if moving here puts us on a collision course
                 for enemy_move in enemy_possible_positions:
                     if self.manhattan_distance(pos, enemy_move) == 1:
-                        # Potential future head-to-head
                         if length_advantage >= 2:
-                            score += 120.0  # Excellent - seek this out
+                            score += 120.0
                         elif my_length > enemy_length:
-                            score += 80.0  # Good - we want this
+                            score += 80.0
                         elif my_length == enemy_length:
-                            score -= 200.0  # Bad - could lead to tie
-                            print(f"  🔮 Future tie risk with equal enemy")
+                            score -= 200.0
                         else:
-                            score -= 120.0  # Bad - avoid this
+                            score -= 120.0
         
         return score
 
@@ -737,72 +582,43 @@ class BattlesnakeLogic:
         return abs(pos1[0] - pos2[0]) + abs(pos1[1] - pos2[1])
 
     def adjust_strategy(self, my_snake: Dict, board: Dict):
-        """Dynamically adjust weights based on snake health, length, and competitive positioning"""
+        """Dynamically adjust weights based on snake health, length, and positioning"""
         health = my_snake['health']
         length = len(my_snake['body'])
         
         self.weights = self.base_weights.copy()
         
-        # Check if we're the biggest snake (or tied for biggest)
-        my_length = len(my_snake['body'])
-        enemy_snakes = [s for s in board['snakes'] if s['id'] != my_snake['id']]
-        
-        is_biggest = True
-        has_2plus_advantage = False
-        
-        if enemy_snakes:
-            max_enemy_length = max(len(s['body']) for s in enemy_snakes)
-            is_biggest = my_length >= max_enemy_length
-            has_2plus_advantage = my_length >= max_enemy_length + 2
-        
-        # HUNTER MODE: If we're 2+ spaces longer than ALL enemies, hunt them down!
-        if has_2plus_advantage and health >= 40:
-            self.apply_hunter_strategy()
-            print(f"  🎯 HUNTER MODE: 2+ advantage (L:{length}), actively hunting enemies!")
-        
         # VERY LONG SNAKE: Survival and space management is priority
-        elif length >= 15:
+        if length >= 15:
             self.apply_survival_strategy()
-            print(f"  🐍 SURVIVAL MODE: Very long snake (L:{length}), focus on space!")
-        
-        # DOMINANT STRATEGY: If we're the biggest and healthy, be aggressive
-        elif is_biggest and health >= 50 and length >= 5:
-            self.apply_dominant_strategy()
-            print(f"  🏆 DOMINANT MODE: Biggest snake (L:{length}), hunt enemies!")
+            print(f"  🐍 SURVIVAL MODE: Very long snake (L:{length})")
         
         # LONG SNAKE: Balance between space and strategy
         elif length >= 10:
             self.apply_long_snake_strategy()
             print(f"  📏 LONG SNAKE MODE: Need lots of space (L:{length})")
         
-        # Strategy 1: High health + Short length = AGGRESSIVE
+        # High health + Short length = AGGRESSIVE
         elif (health >= self.strategy_thresholds['high_health'] and 
             length <= self.strategy_thresholds['short_length']):
             self.apply_aggressive_strategy()
             
-        # Strategy 2: Low health + Short length = FOOD PRIORITY
+        # Low health + Short length = FOOD PRIORITY
         elif (health <= self.strategy_thresholds['low_health'] and 
               length <= self.strategy_thresholds['short_length']):
             self.apply_food_priority_strategy()
             
-        # Strategy 3: Low health + Long length = DEFENSIVE
+        # Low health + Long length = DEFENSIVE
         elif (health <= self.strategy_thresholds['low_health'] and 
               length >= self.strategy_thresholds['long_length']):
             self.apply_defensive_strategy()
             
-        # Strategy 4: High health + Long length = TERRITORIAL
+        # High health + Long length = TERRITORIAL
         elif (health >= self.strategy_thresholds['high_health'] and 
               length >= self.strategy_thresholds['long_length']):
             self.apply_territorial_strategy()
             
-        # Default: Moderate health/length = BALANCED
-        else:
-            self.apply_balanced_strategy() TERRITORIAL
-        elif (health >= self.strategy_thresholds['high_health'] and 
-              length >= self.strategy_thresholds['long_length']):
-            self.apply_territorial_strategy()
-            
-        # Default: Moderate health/length = BALANCED
+        # Default: BALANCED
         else:
             self.apply_balanced_strategy()
 
@@ -815,31 +631,11 @@ class BattlesnakeLogic:
             'center_attraction': 10.0,
         })
 
-    def apply_dominant_strategy(self):
-        """When we're the biggest snake - seek out and eliminate enemies"""
-        self.weights.update({
-            'avoid_enemies': 20.0,       # Low avoidance - we want to confront
-            'head_to_head': 50.0,        # POSITIVE score for head-to-heads (we win them)
-            'food_attraction': 25.0,     # Moderate food seeking
-            'space_control': 20.0,       # Some space control
-            'center_attraction': 15.0,   # Control center for dominance
-        })
-
-    def apply_hunter_strategy(self):
-        """When we have 2+ length advantage - actively hunt and trap enemies"""
-        self.weights.update({
-            'avoid_enemies': 10.0,       # Minimal avoidance - we're hunting
-            'head_to_head': 80.0,        # VERY POSITIVE - seek head-to-heads aggressively
-            'food_attraction': 20.0,     # Lower food priority (we're already big)
-            'space_control': 25.0,       # Moderate space control (still need to survive)
-            'center_attraction': 10.0,   # Moderate center control
-        })
-
     def apply_food_priority_strategy(self):
         self.weights.update({
             'food_attraction': 60.0,
             'avoid_enemies': 120.0,
-            'head_to_head': -120.0,     # Increased penalty - we're weak, avoid all confrontations
+            'head_to_head': -120.0,
             'space_control': 5.0,
             'center_attraction': 2.0,
         })
@@ -863,23 +659,23 @@ class BattlesnakeLogic:
         })
 
     def apply_long_snake_strategy(self):
-        """For long snakes (10-14 length) - prioritize space and avoid self-trap"""
+        """For long snakes (10-14 length) - prioritize space"""
         self.weights.update({
-            'avoid_enemies': 90.0,       # Higher enemy avoidance
-            'head_to_head': -60.0,       # More cautious with confrontations
-            'food_attraction': 20.0,     # Moderate food seeking
-            'space_control': 50.0,       # MAXIMUM space control priority
-            'center_attraction': 5.0,    # Less center focus (can trap us)
+            'avoid_enemies': 90.0,
+            'head_to_head': -60.0,
+            'food_attraction': 20.0,
+            'space_control': 50.0,
+            'center_attraction': 5.0,
         })
 
     def apply_survival_strategy(self):
         """For very long snakes (15+) - all about not self-trapping"""
         self.weights.update({
-            'avoid_enemies': 100.0,      # Maximum enemy avoidance
-            'head_to_head': -80.0,       # Avoid all confrontations
-            'food_attraction': 15.0,     # Low food priority (we're already long)
-            'space_control': 60.0,       # CRITICAL: maintain open space
-            'center_attraction': 2.0,    # Avoid center (too confined)
+            'avoid_enemies': 100.0,
+            'head_to_head': -80.0,
+            'food_attraction': 15.0,
+            'space_control': 60.0,
+            'center_attraction': 2.0,
         })
 
     def apply_balanced_strategy(self):
@@ -890,20 +686,11 @@ class BattlesnakeLogic:
         health = my_snake['health']
         length = len(my_snake['body'])
         
-        # Check for hunter mode (highest head_to_head weight)
-        if self.weights.get('head_to_head', -50) >= 80:
-            return f"HUNTER (H:{health}, L:{length})"
-        
-        # Check for special long snake modes
         if length >= 15:
             return f"SURVIVAL (H:{health}, L:{length})"
         
-        if length >= 10 and self.weights.get('space_control', 15) >= 50:
+        if length >= 10:
             return f"LONG_SNAKE (H:{health}, L:{length})"
-        
-        # Check dominant mode
-        if self.weights.get('head_to_head', -50) > 0:
-            return f"DOMINANT (H:{health}, L:{length})"
         
         if (health >= self.strategy_thresholds['high_health'] and 
             length <= self.strategy_thresholds['short_length']):
@@ -969,3 +756,46 @@ def create_battlesnake_server():
     except ImportError:
         print("Flask not available. Install with: pip install flask")
         return None
+
+
+# Example usage and testing
+if __name__ == "__main__":
+    # Example game state for testing
+    example_game_state = {
+        "game": {"id": "test", "timeout": 500},
+        "turn": 1,
+        "board": {
+            "height": 11,
+            "width": 11,
+            "food": [{"x": 5, "y": 5}],
+            "snakes": [
+                {
+                    "id": "my-snake",
+                    "name": "My Snake",
+                    "health": 90,
+                    "body": [{"x": 1, "y": 1}, {"x": 1, "y": 0}],
+                    "head": {"x": 1, "y": 1}
+                }
+            ]
+        },
+        "you": {
+            "id": "my-snake",
+            "name": "My Snake",
+            "health": 90,
+            "body": [{"x": 1, "y": 1}, {"x": 1, "y": 0}],
+            "head": {"x": 1, "y": 1}
+        }
+    }
+    
+    # Test the logic
+    snake_logic = BattlesnakeLogic()
+    
+    print("=== TESTING BATTLESNAKE LOGIC ===")
+    move = snake_logic.get_move(example_game_state)
+    print(f"Recommended move: {move}")
+    
+    # Create Flask server if available
+    app = create_battlesnake_server()
+    if app:
+        print("\nFlask server created. Run with: python battlesnake.py")
+        # Uncomment to run: app.run(host='0.0.0.0', port=8080)
