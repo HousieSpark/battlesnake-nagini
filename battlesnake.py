@@ -45,6 +45,7 @@ class BattlesnakeLogic:
         print(f"\n=== TURN {game_state.get('turn', 0)} ===")
         print(f"Head position: ({head['x']}, {head['y']})")
         print(f"Board size: {board['width']}x{board['height']}")
+        print(f"Health: {my_snake['health']}, Length: {len(my_snake['body'])}")
         
         # FIRST: Get all safe moves (no walls, no immediate death)
         safe_moves = self.get_safe_moves(head, my_snake, board)
@@ -70,48 +71,58 @@ class BattlesnakeLogic:
             new_pos = self.get_new_position(head, direction)
             score = 0.0
             
-            # CRITICAL: Extra penalty for risky equal-length scenarios
-            equal_length_penalty = self.calculate_equal_length_danger(new_pos, my_snake, board)
-            score += equal_length_penalty
+            try:
+                # CRITICAL: Extra penalty for risky equal-length scenarios
+                equal_length_penalty = self.calculate_equal_length_danger(new_pos, my_snake, board)
+                score += equal_length_penalty
+                
+                # Add wall proximity penalty
+                wall_proximity_score = self.calculate_wall_proximity_score(new_pos, board)
+                score += wall_proximity_score
+                
+                # Check for traps and dead ends
+                trap_penalty = self.calculate_trap_score(new_pos, my_snake, board)
+                score += trap_penalty
+                
+                # Skip heavy calculations if trapped badly
+                if trap_penalty > -500:
+                    # Calculate escape routes
+                    escape_score = self.calculate_escape_route_score(new_pos, my_snake, board)
+                    score += escape_score
+                    
+                    # Look ahead for future traps (important for long snakes)
+                    future_space_score = self.calculate_future_space_score(new_pos, my_snake, board)
+                    score += future_space_score
+                    
+                    # Smart tail chasing
+                    tail_score = self.calculate_tail_chase_score(new_pos, my_snake, board)
+                    score += tail_score
+                    
+                    # HUNTER MODE: If we're significantly bigger, hunt enemies!
+                    hunter_score = self.calculate_hunter_score(new_pos, my_snake, board)
+                    score += hunter_score
+                    
+                    # Strategic factors
+                    score += self.calculate_food_score(new_pos, board['food'])
+                    score += self.calculate_space_score(new_pos, my_snake, board)
+                    score += self.calculate_center_score(new_pos, board)
+                    score += self.calculate_enemy_avoidance_score(new_pos, board['snakes'], my_snake)
+                    score += self.calculate_head_to_head_score(new_pos, board['snakes'], my_snake)
             
-            # Add wall proximity penalty
-            wall_proximity_score = self.calculate_wall_proximity_score(new_pos, board)
-            score += wall_proximity_score
-            
-            # Check for traps and dead ends
-            trap_penalty = self.calculate_trap_score(new_pos, my_snake, board)
-            score += trap_penalty
-            
-            # Skip heavy calculations if trapped badly
-            if trap_penalty > -500:
-                # Calculate escape routes
-                escape_score = self.calculate_escape_route_score(new_pos, my_snake, board)
-                score += escape_score
-                
-                # Look ahead for future traps (important for long snakes)
-                future_space_score = self.calculate_future_space_score(new_pos, my_snake, board)
-                score += future_space_score
-                
-                # Smart tail chasing
-                tail_score = self.calculate_tail_chase_score(new_pos, my_snake, board)
-                score += tail_score
-                
-                # HUNTER MODE: If we're significantly bigger, hunt enemies!
-                hunter_score = self.calculate_hunter_score(new_pos, my_snake, board)
-                score += hunter_score
-                
-                # Strategic factors
-                score += self.calculate_food_score(new_pos, board['food'])
-                score += self.calculate_space_score(new_pos, my_snake, board)
-                score += self.calculate_center_score(new_pos, board)
-                score += self.calculate_enemy_avoidance_score(new_pos, board['snakes'], my_snake)
-                score += self.calculate_head_to_head_score(new_pos, board['snakes'], my_snake)
+            except Exception as e:
+                print(f"  ⚠️ ERROR scoring {direction}: {e}")
+                score = -999999.0  # Heavily penalize moves that cause errors
             
             move_scores[direction] = score
         
         # Sort by score
         sorted_moves = sorted(move_scores.items(), key=lambda x: x[1], reverse=True)
         best_move = sorted_moves[0][0]
+        
+        # Safety check: Make sure best move is actually in safe_moves
+        if best_move not in safe_moves:
+            print(f"⚠️ WARNING: Best move {best_move} not in safe moves, using first safe move")
+            best_move = safe_moves[0]
         
         strategy = self.get_current_strategy(my_snake)
         print(f"Strategy: {strategy}")
@@ -275,8 +286,12 @@ class BattlesnakeLogic:
             distance_to_enemy = self.manhattan_distance(pos, enemy_head)
             
             # Calculate enemy's available space (are they trapped?)
-            enemy_space = len(self.limited_flood_fill(enemy_head, enemy, board, limit=40))
-            enemy_is_trapped = enemy_space < enemy_length * 2
+            try:
+                enemy_space = len(self.limited_flood_fill(enemy_head, enemy, board, limit=40))
+                enemy_is_trapped = enemy_space < enemy_length * 2
+            except:
+                enemy_space = 100
+                enemy_is_trapped = False
             
             # AGGRESSIVE HEAD HUNTING
             if distance_to_enemy <= 2:
@@ -300,20 +315,27 @@ class BattlesnakeLogic:
                 print(f"  🕸️ TRAPPING: Enemy is trapped with low space ({enemy_space} tiles)")
             
             # CUTOFF STRATEGY: Try to position between enemy and open space
-            # Find direction from enemy to largest open area
-            enemy_best_escape = self.find_best_escape_direction(enemy_head, enemy, board)
-            if enemy_best_escape:
-                # Check if we're moving to block their escape
-                if self.is_blocking_escape(pos, enemy_head, enemy_best_escape):
-                    score += 250.0
-                    print(f"  🚧 BLOCKING: Cutting off enemy's best escape route!")
+            try:
+                enemy_best_escape = self.find_best_escape_direction(enemy_head, enemy, board)
+                if enemy_best_escape:
+                    # Check if we're moving to block their escape
+                    if self.is_blocking_escape(pos, enemy_head, enemy_best_escape):
+                        score += 250.0
+                        print(f"  🚧 BLOCKING: Cutting off enemy's best escape route!")
+            except Exception as e:
+                print(f"  Warning: Error in escape calculation: {e}")
+                pass
             
             # CORNER PUSHING: Bonus for pushing enemy toward walls
-            enemy_wall_proximity = self.get_wall_proximity(enemy_head, board)
-            if enemy_wall_proximity <= 2 and distance_to_enemy <= 3:
-                # Enemy is near wall and we're close - push them!
-                score += 120.0
-                print(f"  🧱 CORNERING: Pushing enemy toward wall (wall dist: {enemy_wall_proximity})")
+            try:
+                enemy_wall_proximity = self.get_wall_proximity(enemy_head, board)
+                if enemy_wall_proximity <= 2 and distance_to_enemy <= 3:
+                    # Enemy is near wall and we're close - push them!
+                    score += 120.0
+                    print(f"  🧱 CORNERING: Pushing enemy toward wall (wall dist: {enemy_wall_proximity})")
+            except Exception as e:
+                print(f"  Warning: Error in wall proximity: {e}")
+                pass
         
         return score
 
