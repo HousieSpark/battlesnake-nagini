@@ -787,6 +787,16 @@ class BattlesnakeLogic:
             'center_attraction': 15.0,   # Control center for dominance
         })
 
+    def apply_hunter_strategy(self):
+        """When we have 2+ length advantage - actively hunt and trap enemies"""
+        self.weights.update({
+            'avoid_enemies': 10.0,       # Minimal avoidance - we're hunting
+            'head_to_head': 80.0,        # VERY POSITIVE - seek head-to-heads aggressively
+            'food_attraction': 20.0,     # Lower food priority (we're already big)
+            'space_control': 25.0,       # Moderate space control (still need to survive)
+            'center_attraction': 10.0,   # Moderate center control
+        })
+
     def apply_food_priority_strategy(self):
         self.weights.update({
             'food_attraction': 60.0,
@@ -841,6 +851,10 @@ class BattlesnakeLogic:
         """Get a description of the current strategy"""
         health = my_snake['health']
         length = len(my_snake['body'])
+        
+        # Check for hunter mode (highest head_to_head weight)
+        if self.weights.get('head_to_head', -50) >= 80:
+            return f"HUNTER (H:{health}, L:{length})"
         
         # Check for special long snake modes
         if length >= 15:
