@@ -217,7 +217,7 @@ class BattlesnakeLogic:
         if min_wall_dist == 0:
             return -50.0
         elif min_wall_dist == 1:
-            return -20.0
+            return -10.0
         elif min_wall_dist == 2:
             return -5.0
         else:
