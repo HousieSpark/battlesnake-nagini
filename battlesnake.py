@@ -9,7 +9,7 @@ class BattlesnakeLogic:
             'avoid_walls': 100.0,
             'avoid_body': 100.0,
             'avoid_enemies': 80.0,
-            'food_attraction': 30.0,
+            'food_attraction': 20.0,
             'center_attraction': 5.0,
             'space_control': 15.0,
             'head_to_head': -50.0,
@@ -95,6 +95,10 @@ class BattlesnakeLogic:
                 # Smart tail chasing
                 tail_score = self.calculate_tail_chase_score(new_pos, my_snake, board)
                 score += tail_score
+                
+                # SIZE-BASED TACTICS: Aggression when bigger, trapping when smaller
+                size_tactic_score = self.calculate_size_based_tactics(new_pos, my_snake, board)
+                score += size_tactic_score
                 
                 # Strategic factors
                 score += self.calculate_food_score(new_pos, board['food'])
@@ -217,7 +221,7 @@ class BattlesnakeLogic:
         if min_wall_dist == 0:
             return -50.0
         elif min_wall_dist == 1:
-            return -10.0
+            return -20.0
         elif min_wall_dist == 2:
             return -5.0
         else:
@@ -346,6 +350,103 @@ class BattlesnakeLogic:
                 return -50.0
         
         return 0.0
+
+    def calculate_size_based_tactics(self, pos: Tuple[int, int], my_snake: Dict, board: Dict) -> float:
+        """Apply different tactics based on size advantage/disadvantage"""
+        my_length = len(my_snake['body'])
+        my_health = my_snake['health']
+        score = 0.0
+        
+        # Need reasonable health for tactics
+        if my_health < 25:
+            return 0.0
+        
+        enemy_snakes = [s for s in board['snakes'] if s['id'] != my_snake['id']]
+        if not enemy_snakes:
+            return 0.0
+        
+        for enemy in enemy_snakes:
+            enemy_length = len(enemy['body'])
+            enemy_head = (enemy['head']['x'], enemy['head']['y'])
+            distance_to_enemy = self.manhattan_distance(pos, enemy_head)
+            length_diff = my_length - enemy_length
+            
+            # TACTIC 1: When 2+ blocks BIGGER - Be aggressive and pursue
+            if length_diff >= 2:
+                if distance_to_enemy <= 3:
+                    # Close pursuit
+                    bonus = 200.0 + (50.0 * min(length_diff - 2, 3))  # Scale bonus with advantage
+                    score += bonus
+                    print(f"  🎯 AGGRESSIVE PURSUIT: Much bigger ({my_length} vs {enemy_length}), distance {distance_to_enemy}")
+                elif distance_to_enemy <= 5:
+                    # Medium range pursuit
+                    bonus = 100.0 + (30.0 * min(length_diff - 2, 3))
+                    score += bonus
+                    print(f"  🏹 CHASING: Bigger snake approaching ({my_length} vs {enemy_length})")
+                
+                # Bonus for cutting off their movement
+                enemy_space = len(self.limited_flood_fill(enemy_head, enemy, board, limit=30))
+                if enemy_space < enemy_length * 2 and distance_to_enemy <= 4:
+                    score += 150.0
+                    print(f"  🕸️ ENEMY TRAPPED: Limited space ({enemy_space} tiles)")
+            
+            # TACTIC 2: When SMALLER - Focus on trapping them, not direct confrontation
+            elif length_diff < 0:  # We're smaller
+                abs_diff = abs(length_diff)
+                
+                # Calculate enemy's escape routes
+                enemy_escape_count = 0
+                for direction in self.directions:
+                    enemy_next = self.get_new_position(enemy['head'], direction)
+                    if self.is_position_safe(enemy_next, enemy, board):
+                        enemy_escape_count += 1
+                
+                # If enemy has limited options, position to reduce them further
+                if enemy_escape_count <= 2 and distance_to_enemy <= 3:
+                    score += 180.0
+                    print(f"  🪤 TRAPPING BIGGER SNAKE: Enemy has {enemy_escape_count} escapes")
+                
+                # Try to position between enemy and open space
+                enemy_accessible_space = len(self.limited_flood_fill(enemy_head, enemy, board, limit=40))
+                
+                # Find where most open space is
+                best_space_direction = None
+                max_space = 0
+                for direction in self.directions:
+                    test_pos = self.get_new_position(enemy['head'], direction)
+                    if self.is_position_safe(test_pos, enemy, board):
+                        test_space = len(self.limited_flood_fill(test_pos, enemy, board, limit=30))
+                        if test_space > max_space:
+                            max_space = test_space
+                            best_space_direction = test_pos
+                
+                # If we can block their path to open space
+                if best_space_direction:
+                    dist_us_to_space = self.manhattan_distance(pos, best_space_direction)
+                    dist_them_to_space = self.manhattan_distance(enemy_head, best_space_direction)
+                    
+                    if dist_us_to_space <= dist_them_to_space and dist_us_to_space <= 3:
+                        score += 200.0
+                        print(f"  🚧 BLOCKING ESCAPE: Cutting off bigger snake's path")
+                
+                # Push them toward walls
+                enemy_wall_dist = self.get_min_wall_distance(enemy_head, board)
+                if enemy_wall_dist <= 2 and distance_to_enemy <= 3:
+                    score += 120.0
+                    print(f"  🧱 CORNERING: Pushing bigger snake toward wall (dist: {enemy_wall_dist})")
+                
+                # Don't get too close though - stay safe
+                if distance_to_enemy <= 2:
+                    score -= 100.0  # Slight penalty for being very close to bigger snake
+        
+        return score
+
+    def get_min_wall_distance(self, pos: Tuple[int, int], board: Dict) -> int:
+        """Get minimum distance to any wall"""
+        x, y = pos
+        width, height = board['width'], board['height']
+        
+        return min(x, width - 1 - x, y, height - 1 - y)
 
     def calculate_tail_chase_score(self, pos: Tuple[int, int], my_snake: Dict, board: Dict) -> float:
         """Smart tail chasing - follow tail when safe, CRITICAL for long snakes"""
