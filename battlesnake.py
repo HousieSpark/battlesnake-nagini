@@ -375,7 +375,7 @@ class BattlesnakeLogic:
             if length_diff >= 2:
                 if distance_to_enemy <= 3:
                     # Close pursuit
-                    bonus = 200.0 + (50.0 * min(length_diff - 2, 3))  # Scale bonus with advantage
+                    bonus = 200.0 + (50.0 * min(length_diff - 2, 3))
                     score += bonus
                     print(f"  🎯 AGGRESSIVE PURSUIT: Much bigger ({my_length} vs {enemy_length}), distance {distance_to_enemy}")
                 elif distance_to_enemy <= 5:
@@ -390,54 +390,42 @@ class BattlesnakeLogic:
                     score += 150.0
                     print(f"  🕸️ ENEMY TRAPPED: Limited space ({enemy_space} tiles)")
             
-            # TACTIC 2: When SMALLER - Focus on trapping them, not direct confrontation
-            elif length_diff < 0:  # We're smaller
+            # TACTIC 2: When MUCH SMALLER (3+) - Just avoid, don't try to trap
+            elif length_diff <= -3:
+                if distance_to_enemy <= 4:
+                    # Just stay away from much bigger snakes
+                    penalty = -150.0 * (1 + abs(length_diff) // 3)
+                    score += penalty
+                    print(f"  🏃 FLEEING: Much smaller ({my_length} vs {enemy_length}), keeping distance")
+            
+            # TACTIC 3: When SLIGHTLY SMALLER (1-2) - Smart trapping
+            elif length_diff < 0:
                 abs_diff = abs(length_diff)
                 
-                # Calculate enemy's escape routes
-                enemy_escape_count = 0
-                for direction in self.directions:
-                    enemy_next = self.get_new_position(enemy['head'], direction)
-                    if self.is_position_safe(enemy_next, enemy, board):
-                        enemy_escape_count += 1
+                # Quick check: Count enemy's escape routes (efficient)
+                enemy_escape_count = sum(
+                    1 for direction in self.directions
+                    if self.is_position_safe(
+                        self.get_new_position(enemy['head'], direction),
+                        enemy,
+                        board
+                    )
+                )
                 
                 # If enemy has limited options, position to reduce them further
                 if enemy_escape_count <= 2 and distance_to_enemy <= 3:
                     score += 180.0
                     print(f"  🪤 TRAPPING BIGGER SNAKE: Enemy has {enemy_escape_count} escapes")
                 
-                # Try to position between enemy and open space
-                enemy_accessible_space = len(self.limited_flood_fill(enemy_head, enemy, board, limit=40))
-                
-                # Find where most open space is
-                best_space_direction = None
-                max_space = 0
-                for direction in self.directions:
-                    test_pos = self.get_new_position(enemy['head'], direction)
-                    if self.is_position_safe(test_pos, enemy, board):
-                        test_space = len(self.limited_flood_fill(test_pos, enemy, board, limit=30))
-                        if test_space > max_space:
-                            max_space = test_space
-                            best_space_direction = test_pos
-                
-                # If we can block their path to open space
-                if best_space_direction:
-                    dist_us_to_space = self.manhattan_distance(pos, best_space_direction)
-                    dist_them_to_space = self.manhattan_distance(enemy_head, best_space_direction)
-                    
-                    if dist_us_to_space <= dist_them_to_space and dist_us_to_space <= 3:
-                        score += 200.0
-                        print(f"  🚧 BLOCKING ESCAPE: Cutting off bigger snake's path")
-                
-                # Push them toward walls
+                # Simple wall-pushing logic (no expensive flood fill)
                 enemy_wall_dist = self.get_min_wall_distance(enemy_head, board)
                 if enemy_wall_dist <= 2 and distance_to_enemy <= 3:
                     score += 120.0
                     print(f"  🧱 CORNERING: Pushing bigger snake toward wall (dist: {enemy_wall_dist})")
                 
-                # Don't get too close though - stay safe
+                # Maintain safe distance
                 if distance_to_enemy <= 2:
-                    score -= 100.0  # Slight penalty for being very close to bigger snake
+                    score -= 80.0
         
         return score
 
@@ -468,9 +456,18 @@ class BattlesnakeLogic:
         accessible = len(self.limited_flood_fill(pos, my_snake, board, limit=50))
         space_ratio = accessible / body_length if body_length > 0 else 1.0
         
-        # For long snakes in tight spaces, tail chasing becomes ESSENTIAL
+        # CRITICAL: For long snakes in tight spaces, tail chasing is SURVIVAL
         if body_length >= 10:
-            if space_ratio < 2.5:
+            if space_ratio < 2.0:
+                # VERY tight space - tail is our lifeline!
+                if distance_to_tail == 1:
+                    return 400.0  # Massive bonus - stay RIGHT on tail
+                elif distance_to_tail == 2:
+                    return 250.0
+                elif distance_to_tail <= 3:
+                    return 150.0
+            elif space_ratio < 2.5:
+                # Tight space
                 if distance_to_tail == 1:
                     return 200.0
                 elif distance_to_tail == 2:
@@ -484,7 +481,9 @@ class BattlesnakeLogic:
                     return 30.0
         elif body_length >= 6:
             if space_ratio < 2.0:
-                if distance_to_tail <= 2:
+                if distance_to_tail <= 1:
+                    return 200.0
+                elif distance_to_tail <= 2:
                     return 100.0
                 elif distance_to_tail <= 4:
                     return 40.0
@@ -568,9 +567,28 @@ class BattlesnakeLogic:
         return self.weights['food_attraction'] * (10.0 / (min_distance + 1))
 
     def calculate_space_score(self, pos: Tuple[int, int], my_snake: Dict, board: Dict) -> float:
-        """Calculate score based on available space"""
+        """Calculate score based on available space - scales with snake length"""
+        body_length = len(my_snake['body'])
         accessible_spaces = self.limited_flood_fill(pos, my_snake, board, limit=50)
-        return self.weights['space_control'] * len(accessible_spaces) * 0.1
+        space_count = len(accessible_spaces)
+        
+        # Base score from space control weight
+        base_score = self.weights['space_control'] * space_count * 0.1
+        
+        # CRITICAL BONUS: For long snakes, extra bonus for having good space
+        if body_length >= 10:
+            space_ratio = space_count / body_length
+            if space_ratio >= 3.0:
+                # Excellent space - big bonus
+                base_score += 100.0
+            elif space_ratio >= 2.5:
+                # Good space
+                base_score += 50.0
+            elif space_ratio < 2.0:
+                # Dangerous - this was already penalized in trap_score, but reinforce it
+                base_score -= 50.0
+        
+        return base_score
 
     def calculate_center_score(self, pos: Tuple[int, int], board: Dict) -> float:
         """Calculate score for staying near the center"""
@@ -612,15 +630,8 @@ class BattlesnakeLogic:
             enemy_possible_positions = []
             for direction in self.directions:
                 enemy_next_pos = self.get_new_position(snake['head'], direction)
-                x, y = enemy_next_pos
-                if not (x < 0 or x >= 11 or y < 0 or y >= 11):
-                    hit_body = False
-                    for seg in snake['body'][:-1]:
-                        if enemy_next_pos == (seg['x'], seg['y']):
-                            hit_body = True
-                            break
-                    if not hit_body:
-                        enemy_possible_positions.append(enemy_next_pos)
+                if self.is_position_safe(enemy_next_pos, snake, {'snakes': snakes, 'width': 11, 'height': 11}):
+                    enemy_possible_positions.append(enemy_next_pos)
             
             # Check if we're moving to a position where enemy could also move
             if pos in enemy_possible_positions:
@@ -689,8 +700,18 @@ class BattlesnakeLogic:
         
         self.weights = self.base_weights.copy()
         
+        # Check how much accessible space we currently have
+        head = my_snake['head']
+        current_space = len(self.limited_flood_fill((head['x'], head['y']), my_snake, board, limit=80))
+        space_ratio = current_space / length if length > 0 else 10.0
+        
+        # CRITICAL: If space is getting tight for our length, prioritize survival
+        if space_ratio < 2.0 and length >= 8:
+            self.apply_cramped_survival_strategy()
+            print(f"  🚨 CRAMPED! Space ratio: {space_ratio:.1f} (L:{length}, Space:{current_space})")
+        
         # VERY LONG SNAKE: Survival and space management is priority
-        if length >= 15:
+        elif length >= 15:
             self.apply_survival_strategy()
             print(f"  🐍 SURVIVAL MODE: Very long snake (L:{length})")
         
@@ -779,6 +800,16 @@ class BattlesnakeLogic:
             'center_attraction': 2.0,
         })
 
+    def apply_cramped_survival_strategy(self):
+        """Emergency mode when space is critically low relative to snake length"""
+        self.weights.update({
+            'avoid_enemies': 120.0,      # Maximum avoidance
+            'head_to_head': -150.0,      # Avoid all confrontations
+            'food_attraction': 5.0,      # Minimal food priority
+            'space_control': 100.0,      # MAXIMUM space priority
+            'center_attraction': 0.0,    # Don't care about center
+        })
+
     def apply_balanced_strategy(self):
         pass
 
@@ -786,6 +817,10 @@ class BattlesnakeLogic:
         """Get a description of the current strategy"""
         health = my_snake['health']
         length = len(my_snake['body'])
+        
+        # Check for cramped mode (space_control weight will be 100)
+        if self.weights.get('space_control', 15) >= 100:
+            return f"🚨 CRAMPED (H:{health}, L:{length})"
         
         if length >= 15:
             return f"SURVIVAL (H:{health}, L:{length})"
